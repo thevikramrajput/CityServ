@@ -28,4 +28,3 @@ export function FeatureCard({ title, description, icon }: FeatureCardProps) {
     </Card>
   )
 }
-

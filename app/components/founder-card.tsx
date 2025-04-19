@@ -20,4 +20,3 @@ export function FounderCard({ name, role, image, bio }: FounderCardProps) {
     </Card>
   )
 }
-

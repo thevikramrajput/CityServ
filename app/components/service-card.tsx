@@ -26,4 +26,3 @@ export function ServiceCard({ title, description, icon, price }: ServiceCardProp
     </Link>
   )
 }
-

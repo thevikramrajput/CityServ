@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useForm } from "react-hook-form"
@@ -11,13 +12,13 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { registerProvider } from "@/app/actions/provider"
+import { getServices } from "@/app/actions/service"
+import { getCurrentUser } from "@/app/actions/auth"
 
 const formSchema = z.object({
   fullName: z.string().min(2, {
     message: "Name must be at least 2 characters.",
-  }),
-  email: z.string().email({
-    message: "Please enter a valid email address.",
   }),
   phone: z.string().min(10, {
     message: "Please enter a valid phone number.",
@@ -32,27 +33,69 @@ const formSchema = z.object({
 
 export default function RegisterProvider() {
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [services, setServices] = useState<any[]>([])
+  const [user, setUser] = useState<any>(null)
+  const router = useRouter()
+
+  useEffect(() => {
+    async function loadData() {
+      const userData = await getCurrentUser()
+      if (!userData) {
+        router.push("/sign-in?redirect=/register-provider")
+        return
+      }
+      setUser(userData)
+
+      const { services: serviceData, error } = await getServices()
+      if (serviceData) {
+        setServices(serviceData)
+      }
+    }
+
+    loadData()
+  }, [router])
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       fullName: "",
-      email: "",
       phone: "",
       serviceType: "",
       experience: "",
     },
   })
 
-  function onSubmit(values: z.infer<typeof formSchema>) {
+  // Update form with user data when available
+  useEffect(() => {
+    if (user?.name) {
+      form.setValue("fullName", user.name)
+    }
+  }, [user, form])
+
+  async function onSubmit(values: z.infer<typeof formSchema>) {
     setIsSubmitting(true)
-    // In a real application, you would send this data to your backend
-    console.log(values)
-    setTimeout(() => {
+    setError(null)
+
+    const formData = new FormData()
+    formData.append("fullName", values.fullName)
+    formData.append("phone", values.phone)
+    formData.append("serviceType", values.serviceType)
+    formData.append("experience", values.experience)
+
+    const result = await registerProvider(formData)
+
+    if (result.error) {
+      setError(result.error._form?.[0] || "An error occurred during registration")
       setIsSubmitting(false)
-      alert("Registration submitted successfully!")
-      form.reset()
-    }, 2000)
+    } else if (result.success) {
+      router.push("/provider/dashboard")
+      router.refresh()
+    }
+  }
+
+  if (!user) {
+    return <div className="container py-10 text-center">Loading...</div>
   }
 
   return (
@@ -65,6 +108,7 @@ export default function RegisterProvider() {
         <CardContent>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
+              {error && <div className="bg-destructive/15 text-destructive text-sm p-3 rounded-md">{error}</div>}
               <FormField
                 control={form.control}
                 name="fullName"
@@ -73,19 +117,6 @@ export default function RegisterProvider() {
                     <FormLabel>Full Name</FormLabel>
                     <FormControl>
                       <Input placeholder="John Doe" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="email"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Email</FormLabel>
-                    <FormControl>
-                      <Input type="email" placeholder="johndoe@example.com" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -117,11 +148,11 @@ export default function RegisterProvider() {
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="plumbing">Plumbing</SelectItem>
-                        <SelectItem value="electrical">Electrical Work</SelectItem>
-                        <SelectItem value="carpentry">Carpentry</SelectItem>
-                        <SelectItem value="cleaning">Home Cleaning</SelectItem>
-                        <SelectItem value="other">Other</SelectItem>
+                        {services.map((service) => (
+                          <SelectItem key={service.id} value={service.id}>
+                            {service.title}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                     <FormMessage />
@@ -164,4 +195,3 @@ export default function RegisterProvider() {
     </div>
   )
 }
-

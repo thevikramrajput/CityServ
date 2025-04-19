@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useForm } from "react-hook-form"
 import * as z from "zod"
@@ -10,6 +11,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
+import { signIn } from "@/app/actions/auth"
 
 const formSchema = z.object({
   email: z.string().email({
@@ -22,6 +24,8 @@ const formSchema = z.object({
 
 export default function SignIn() {
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const router = useRouter()
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -31,14 +35,23 @@ export default function SignIn() {
     },
   })
 
-  function onSubmit(values: z.infer<typeof formSchema>) {
+  async function onSubmit(values: z.infer<typeof formSchema>) {
     setIsSubmitting(true)
-    // In a real application, you would handle authentication here
-    console.log(values)
-    setTimeout(() => {
+    setError(null)
+
+    const formData = new FormData()
+    formData.append("email", values.email)
+    formData.append("password", values.password)
+
+    const result = await signIn(formData)
+
+    if (result.error) {
+      setError(result.error._form?.[0] || "An error occurred during sign in")
       setIsSubmitting(false)
-      alert("Sign in successful!")
-    }, 2000)
+    } else if (result.success) {
+      router.push("/")
+      router.refresh()
+    }
   }
 
   return (
@@ -51,6 +64,7 @@ export default function SignIn() {
         <CardContent>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
+              {error && <div className="bg-destructive/15 text-destructive text-sm p-3 rounded-md">{error}</div>}
               <FormField
                 control={form.control}
                 name="email"
@@ -95,4 +109,3 @@ export default function SignIn() {
     </div>
   )
 }
-
