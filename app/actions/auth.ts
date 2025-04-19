@@ -4,7 +4,7 @@ import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 import { z } from "zod"
 
-import { prisma } from "@/lib/prisma"
+import { sql, toCamelCase } from "@/lib/db"
 import { hashPassword, verifyPassword } from "@/lib/auth"
 
 // Schema for sign up validation
@@ -37,11 +37,11 @@ export async function signUp(formData: FormData) {
 
   try {
     // Check if user already exists
-    const existingUser = await prisma.user.findUnique({
-      where: { email },
-    })
+    const existingUser = await sql`
+      SELECT * FROM users WHERE email = ${email}
+    `
 
-    if (existingUser) {
+    if (existingUser.length > 0) {
       return {
         error: {
           email: ["User with this email already exists"],
@@ -53,13 +53,13 @@ export async function signUp(formData: FormData) {
     const hashedPassword = await hashPassword(password)
 
     // Create user
-    const user = await prisma.user.create({
-      data: {
-        name,
-        email,
-        password: hashedPassword,
-      },
-    })
+    const result = await sql`
+      INSERT INTO users (name, email, password, role)
+      VALUES (${name}, ${email}, ${hashedPassword}, 'CUSTOMER')
+      RETURNING id, name, email, role
+    `
+
+    const user = toCamelCase(result[0])
 
     // Set session cookie
     cookies().set("userId", user.id, {
@@ -96,17 +96,19 @@ export async function signIn(formData: FormData) {
 
   try {
     // Find user
-    const user = await prisma.user.findUnique({
-      where: { email },
-    })
+    const users = await sql`
+      SELECT * FROM users WHERE email = ${email}
+    `
 
-    if (!user) {
+    if (users.length === 0) {
       return {
         error: {
           _form: ["Invalid email or password"],
         },
       }
     }
+
+    const user = users[0]
 
     // Verify password
     const isValid = await verifyPassword(password, user.password)
@@ -151,18 +153,17 @@ export async function getCurrentUser() {
   }
 
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        image: true,
-        role: true,
-      },
-    })
+    const users = await sql`
+      SELECT id, name, email, image_url as "imageUrl", role
+      FROM users
+      WHERE id = ${userId}
+    `
 
-    return user
+    if (users.length === 0) {
+      return null
+    }
+
+    return toCamelCase(users[0])
   } catch (error) {
     console.error("Get current user error:", error)
     return null

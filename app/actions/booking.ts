@@ -2,7 +2,7 @@
 
 import { z } from "zod"
 import { revalidatePath } from "next/cache"
-import { prisma } from "@/lib/prisma"
+import { sql, toCamelCaseArray } from "@/lib/db"
 import { getCurrentUser } from "./auth"
 
 const bookingSchema = z.object({
@@ -42,11 +42,12 @@ export async function createBooking(formData: FormData) {
 
   try {
     // Get service details for pricing
-    const service = await prisma.service.findUnique({
-      where: { id: serviceId },
-    })
+    const services = await sql`
+      SELECT * FROM services
+      WHERE id = ${serviceId}
+    `
 
-    if (!service) {
+    if (services.length === 0) {
       return {
         error: {
           _form: ["Service not found"],
@@ -54,32 +55,33 @@ export async function createBooking(formData: FormData) {
       }
     }
 
+    const service = services[0]
+
     // Parse date and time
     const bookingDate = new Date(date)
     const [hours, minutes] = startTime.split(":").map(Number)
-    const startDateTime = new Date(bookingDate)
-    startDateTime.setHours(hours, minutes)
 
-    // Default booking duration to 1 hour
-    const endDateTime = new Date(startDateTime)
-    endDateTime.setHours(endDateTime.getHours() + 1)
+    // Calculate end time (1 hour later)
+    const endHours = hours + 1
+    const endTime = `${endHours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
 
     // Create booking
-    const booking = await prisma.booking.create({
-      data: {
-        userId: currentUser.id,
-        providerId,
-        serviceId,
-        date: bookingDate,
-        startTime: startDateTime,
-        endTime: endDateTime,
-        totalPrice: service.basePrice,
-        description: description || undefined,
-      },
-    })
+    const result = await sql`
+      INSERT INTO bookings (
+        user_id, provider_id, service_id, 
+        booking_date, start_time, end_time, 
+        total_price, description, status
+      )
+      VALUES (
+        ${currentUser.id}, ${providerId}, ${serviceId}, 
+        ${bookingDate.toISOString().split("T")[0]}, ${startTime}, ${endTime}, 
+        ${service.base_price}, ${description || null}, 'PENDING'
+      )
+      RETURNING id
+    `
 
     revalidatePath("/bookings")
-    return { success: true, bookingId: booking.id }
+    return { success: true, bookingId: result[0].id }
   } catch (error) {
     console.error("Booking creation error:", error)
     return {
@@ -98,25 +100,20 @@ export async function getUserBookings() {
   }
 
   try {
-    const bookings = await prisma.booking.findMany({
-      where: { userId: currentUser.id },
-      include: {
-        service: true,
-        provider: {
-          include: {
-            user: {
-              select: {
-                name: true,
-                image: true,
-              },
-            },
-          },
-        },
-      },
-      orderBy: { date: "desc" },
-    })
+    const bookings = await sql`
+      SELECT 
+        b.*,
+        s.title as service_title, s.description as service_description, s.icon as service_icon,
+        u.name as provider_name, u.image_url as provider_image
+      FROM bookings b
+      JOIN services s ON b.service_id = s.id
+      JOIN providers p ON b.provider_id = p.id
+      JOIN users u ON p.user_id = u.id
+      WHERE b.user_id = ${currentUser.id}
+      ORDER BY b.booking_date DESC, b.start_time DESC
+    `
 
-    return { bookings }
+    return { bookings: toCamelCaseArray(bookings) }
   } catch (error) {
     console.error("Get user bookings error:", error)
     return { error: "Failed to fetch bookings" }
@@ -131,30 +128,29 @@ export async function getProviderBookings() {
   }
 
   try {
-    const provider = await prisma.provider.findUnique({
-      where: { userId: currentUser.id },
-    })
+    const providers = await sql`
+      SELECT id FROM providers WHERE user_id = ${currentUser.id}
+    `
 
-    if (!provider) {
+    if (providers.length === 0) {
       return { error: "Provider not found" }
     }
 
-    const bookings = await prisma.booking.findMany({
-      where: { providerId: provider.id },
-      include: {
-        service: true,
-        user: {
-          select: {
-            name: true,
-            email: true,
-            image: true,
-          },
-        },
-      },
-      orderBy: { date: "desc" },
-    })
+    const providerId = providers[0].id
 
-    return { bookings }
+    const bookings = await sql`
+      SELECT 
+        b.*,
+        s.title as service_title, s.description as service_description,
+        u.name as customer_name, u.email as customer_email, u.image_url as customer_image
+      FROM bookings b
+      JOIN services s ON b.service_id = s.id
+      JOIN users u ON b.user_id = u.id
+      WHERE b.provider_id = ${providerId}
+      ORDER BY b.booking_date DESC, b.start_time DESC
+    `
+
+    return { bookings: toCamelCaseArray(bookings) }
   } catch (error) {
     console.error("Get provider bookings error:", error)
     return { error: "Failed to fetch bookings" }
@@ -169,30 +165,35 @@ export async function updateBookingStatus(bookingId: string, status: "CONFIRMED"
   }
 
   try {
-    const provider = await prisma.provider.findUnique({
-      where: { userId: currentUser.id },
-    })
+    const providers = await sql`
+      SELECT id FROM providers WHERE user_id = ${currentUser.id}
+    `
 
-    if (!provider) {
+    if (providers.length === 0) {
       return { error: "Provider not found" }
     }
 
-    const booking = await prisma.booking.findUnique({
-      where: { id: bookingId },
-    })
+    const providerId = providers[0].id
 
-    if (!booking) {
+    const bookings = await sql`
+      SELECT * FROM bookings WHERE id = ${bookingId}
+    `
+
+    if (bookings.length === 0) {
       return { error: "Booking not found" }
     }
 
-    if (booking.providerId !== provider.id) {
+    const booking = bookings[0]
+
+    if (booking.provider_id !== providerId) {
       return { error: "Unauthorized" }
     }
 
-    await prisma.booking.update({
-      where: { id: bookingId },
-      data: { status },
-    })
+    await sql`
+      UPDATE bookings
+      SET status = ${status}, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ${bookingId}
+    `
 
     revalidatePath("/bookings")
     return { success: true }

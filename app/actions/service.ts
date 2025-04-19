@@ -1,15 +1,17 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { prisma } from "@/lib/prisma"
+import { sql, toCamelCase, toCamelCaseArray } from "@/lib/db"
 import { getCurrentUser } from "./auth"
 
 export async function getServices() {
   try {
-    const services = await prisma.service.findMany({
-      orderBy: { title: "asc" },
-    })
-    return { services }
+    const services = await sql`
+      SELECT * FROM services
+      ORDER BY title ASC
+    `
+
+    return { services: toCamelCaseArray(services) }
   } catch (error) {
     console.error("Get services error:", error)
     return { error: "Failed to fetch services" }
@@ -18,31 +20,32 @@ export async function getServices() {
 
 export async function getServiceById(id: string) {
   try {
-    const service = await prisma.service.findUnique({
-      where: { id },
-      include: {
-        providers: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
-                image: true,
-              },
-            },
-          },
-          where: {
-            isVerified: true,
-          },
-        },
-      },
-    })
+    const services = await sql`
+      SELECT * FROM services
+      WHERE id = ${id}
+    `
 
-    if (!service) {
+    if (services.length === 0) {
       return { error: "Service not found" }
     }
 
-    return { service }
+    const service = toCamelCase(services[0])
+
+    // Get providers for this service
+    const providers = await sql`
+      SELECT p.*, u.name, u.email, u.image_url
+      FROM providers p
+      JOIN users u ON p.user_id = u.id
+      WHERE p.service_id = ${id}
+      AND p.is_verified = true
+    `
+
+    return {
+      service: {
+        ...service,
+        providers: toCamelCaseArray(providers),
+      },
+    }
   } catch (error) {
     console.error("Get service error:", error)
     return { error: "Failed to fetch service" }
@@ -66,17 +69,14 @@ export async function createService(formData: FormData) {
   }
 
   try {
-    const service = await prisma.service.create({
-      data: {
-        title,
-        description,
-        icon,
-        basePrice,
-      },
-    })
+    const result = await sql`
+      INSERT INTO services (title, description, icon, base_price)
+      VALUES (${title}, ${description}, ${icon}, ${basePrice})
+      RETURNING *
+    `
 
     revalidatePath("/services")
-    return { success: true, service }
+    return { success: true, service: toCamelCase(result[0]) }
   } catch (error) {
     console.error("Create service error:", error)
     return { error: "Failed to create service" }

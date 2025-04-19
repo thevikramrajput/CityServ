@@ -7,31 +7,12 @@ import { Input } from "@/components/ui/input"
 import { ServiceCard } from "@/app/components/service-card"
 import { FeatureCard } from "@/app/components/feature-card"
 import { FounderCard } from "@/app/components/founder-card"
+import { NavBar } from "@/app/components/nav-bar"
 
 export default function Home() {
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container flex h-16 items-center justify-between">
-          <Link href="/" className="flex items-center space-x-2">
-            <span className="text-2xl font-bold">Skill Hub</span>
-          </Link>
-          <nav className="hidden md:flex items-center space-x-6">
-            <Link href="/services" className="text-sm font-medium">
-              Services
-            </Link>
-            <Link href="/register-provider" className="text-sm font-medium">
-              Become a Provider
-            </Link>
-            <Link href="/about" className="text-sm font-medium">
-              About Us
-            </Link>
-            <Link href="/sign-in">
-              <Button>Sign In</Button>
-            </Link>
-          </nav>
-        </div>
-      </header>
+      <NavBar />
 
       <main className="flex-1">
         <section className="relative">
